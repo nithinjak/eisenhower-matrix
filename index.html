@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eisenhower Matrix</title>
+<link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+<script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: var(--font, sans-serif); }
+
+  body {
+    display: flex; flex-direction: column;
+    min-height: 100vh; padding: 1rem; gap: 0.75rem;
+    overflow: hidden;
+  }
+
+  /* ── TOP BAR ── */
+  .topbar { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 0.5rem; }
+  .topbar h2 { margin: 0; font-size: 1.25rem; }
+  .topbar-right { display: flex; align-items: center; gap: 0.75rem; }
+  #status-bar { font-size: 0.78rem; opacity: 0.55; }
+  #config-notice { flex-shrink: 0; }
+
+  /* ── LEGEND BUTTON ── */
+  .legend-wrap { position: relative; display: inline-block; }
+  .legend-btn {
+    background: none; border: 1px solid rgba(0,0,0,0.15); border-radius: 50%;
+    width: 22px; height: 22px; font-size: 0.72rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: inherit; opacity: 0.5; transition: opacity 0.15s;
+    flex-shrink: 0;
+  }
+  .legend-btn:hover { opacity: 1; }
+  @media (prefers-color-scheme: dark) { .legend-btn { border-color: rgba(255,255,255,0.2); } }
+
+  .legend-popover {
+    position: absolute; top: calc(100% + 8px); right: 0;
+    width: 280px;
+    background: var(--color-bg, #fff);
+    border: 1px solid var(--color-border, #e0e0e0);
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+    padding: 0.85rem 1rem;
+    z-index: 500;
+    display: none;
+    animation: popfadein 0.15s ease;
+  }
+  .legend-popover.open { display: block; }
+  @keyframes popfadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .legend-popover h4 { font-size: 0.72rem; letter-spacing: 0.07em; text-transform: uppercase; opacity: 0.45; margin-bottom: 0.65rem; }
+
+  .legend-item { display: flex; gap: 0.6rem; align-items: flex-start; margin-bottom: 0.6rem; }
+  .legend-item:last-child { margin-bottom: 0; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 3px;
+  }
+  .ldot-do       { background: #2a6648; }
+  .ldot-schedule { background: #1a3f6e; }
+  .ldot-delegate { background: #8a4a10; }
+  .ldot-delete   { background: #8a2020; }
+  .legend-item-text strong { font-size: 0.8rem; display: block; margin-bottom: 0.1rem; }
+  .legend-item-text span   { font-size: 0.73rem; opacity: 0.6; line-height: 1.4; }
+
+  /* ── TRASH BUTTON ── */
+  .trash-btn {
+    background: none; border: 1px solid rgba(0,0,0,0.15); border-radius: 6px;
+    padding: 0.2rem 0.55rem; font-size: 0.75rem; cursor: pointer;
+    color: inherit; opacity: 0.5; transition: opacity 0.15s;
+    display: flex; align-items: center; gap: 0.3rem;
+  }
+  .trash-btn:hover { opacity: 1; }
+  @media (prefers-color-scheme: dark) { .trash-btn { border-color: rgba(255,255,255,0.2); } }
+
+  /* ── AXIS ── */
+  .axis-x { display: flex; justify-content: space-between; padding: 0 0.25rem; flex-shrink: 0; }
+  .axis-label { font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.4; }
+
+  /* ── MATRIX GRID ── */
+  .matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 0.6rem;
+    flex: 1; min-height: 0;
+  }
+
+  /* ── QUADRANTS ── */
+  .quad {
+    border-radius: 10px; padding: 0.75rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+    min-height: 0; overflow: hidden;
+    transition: box-shadow 0.15s;
+  }
+  .quad-do       { background: #dff0e8; border: 1.5px solid #b2d9c4; }
+  .quad-schedule { background: #dde8f5; border: 1.5px solid #b0c8e8; }
+  .quad-delegate { background: #fdecd6; border: 1.5px solid #f5c99a; }
+  .quad-delete   { background: #fad9d9; border: 1.5px solid #f0aaaa; }
+
+  .quad-do.drag-over       { box-shadow: inset 0 0 0 2.5px #2a6648; }
+  .quad-schedule.drag-over { box-shadow: inset 0 0 0 2.5px #1a3f6e; }
+  .quad-delegate.drag-over { box-shadow: inset 0 0 0 2.5px #8a4a10; }
+  .quad-delete.drag-over   { box-shadow: inset 0 0 0 2.5px #8a2020; }
+
+  @media (prefers-color-scheme: dark) {
+    .quad-do       { background: #1a3328; border-color: #2a5c40; }
+    .quad-schedule { background: #0f2035; border-color: #1a3a5c; }
+    .quad-delegate { background: #3a2008; border-color: #7a4510; }
+    .quad-delete   { background: #3a1010; border-color: #7a2020; }
+  }
+
+  /* ── QUAD HEADER ── */
+  .quad-header { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; flex-wrap: wrap; }
+  .quad-header strong { font-size: 0.95rem; }
+  .quad-hint { font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.5; }
+  .quad-do       .quad-header strong { color: #2a6648; }
+  .quad-schedule .quad-header strong { color: #1a3f6e; }
+  .quad-delegate .quad-header strong { color: #8a4a10; }
+  .quad-delete   .quad-header strong { color: #8a2020; }
+  @media (prefers-color-scheme: dark) {
+    .quad-do       .quad-header strong { color: #7ecfa0; }
+    .quad-schedule .quad-header strong { color: #7ab0e0; }
+    .quad-delegate .quad-header strong { color: #f0b070; }
+    .quad-delete   .quad-header strong { color: #f09090; }
+  }
+
+  /* ── TASK LIST ── */
+  .task-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; flex: 1; overflow-y: auto; min-height: 0; }
+
+  /* ── TASK ITEM ── */
+  .task-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.8rem; line-height: 1.35;
+    padding: 0.35rem 0.45rem; border-radius: 6px;
+    background: rgba(255,255,255,0.65);
+    cursor: grab; user-select: none; touch-action: none;
+    animation: fadein 0.15s ease;
+    border: 1.5px solid transparent;
+    transition: opacity 0.15s, border-color 0.15s;
+  }
+  .task-item:active { cursor: grabbing; }
+  .task-item.dragging { opacity: 0.35; border-color: rgba(0,0,0,0.2); }
+  @media (prefers-color-scheme: dark) {
+    .task-item { background: rgba(255,255,255,0.08); color: inherit; }
+    .btn-del:hover { background: rgba(255,255,255,0.12); }
+  }
+  @keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; } }
+
+  .drag-handle { flex-shrink: 0; opacity: 0.25; font-size: 0.75rem; cursor: grab; line-height: 1; pointer-events: none; letter-spacing: -1px; }
+
+  .task-text { flex: 1; word-break: break-word; cursor: pointer; }
+  .task-text:hover { text-decoration: underline; text-decoration-style: dotted; }
+
+  .has-notes::after {
+    content: ''; display: inline-block;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; opacity: 0.4;
+    margin-left: 5px; vertical-align: middle;
+  }
+
+  .btn-del {
+    background: none; border: none; cursor: pointer;
+    font-size: 0.7rem; opacity: 0.3; padding: 0 0.2rem;
+    border-radius: 3px; color: inherit; flex-shrink: 0; line-height: 1.6;
+  }
+  .btn-del:hover { opacity: 1; background: rgba(0,0,0,0.1); }
+
+  .task-empty { font-size: 0.75rem; opacity: 0.35; font-style: italic; padding: 0.25rem 0.1rem; }
+
+  /* ── ADD ROW ── */
+  .add-row { display: flex; gap: 0.35rem; flex-shrink: 0; margin-top: auto; }
+  .add-row input { flex: 1; margin: 0; font-size: 0.8rem; padding: 0.3rem 0.5rem; min-width: 0; }
+  .add-row button { font-size: 0.8rem; padding: 0.3rem 0.6rem; white-space: nowrap; }
+
+  /* ── DRAG GHOST ── */
+  #drag-ghost {
+    position: fixed; pointer-events: none; z-index: 9999;
+    background: white; border-radius: 6px; padding: 0.4rem 0.7rem;
+    font-size: 0.8rem; box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    max-width: 200px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; opacity: 0; transform: scale(1.04);
+    transition: opacity 0.1s;
+  }
+  #drag-ghost.visible { opacity: 1; }
+
+  /* ── UNDO TOAST ── */
+  #undo-toast {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: #222; color: #fff; border-radius: 8px;
+    padding: 0.6rem 1rem; font-size: 0.82rem;
+    display: flex; align-items: center; gap: 0.75rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.22);
+    z-index: 9000; transition: transform 0.25s cubic-bezier(.4,0,.2,1), opacity 0.25s;
+    opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+  #undo-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: all; }
+  #undo-toast button {
+    background: none; border: 1px solid rgba(255,255,255,0.4); border-radius: 5px;
+    color: #fff; font-size: 0.8rem; padding: 0.15rem 0.6rem; cursor: pointer;
+    transition: background 0.12s;
+  }
+  #undo-toast button:hover { background: rgba(255,255,255,0.15); }
+
+  /* ══════════════════════════════════════
+     SHARED SLIDE PANEL BASE
+  ══════════════════════════════════════ */
+  .panel-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.25);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.22s;
+  }
+  .panel-overlay.open { opacity: 1; pointer-events: all; }
+
+  .slide-panel {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: min(420px, 100vw);
+    background: var(--color-bg, #fff);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+    display: flex; flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+    z-index: 101;
+  }
+  .slide-panel.open { transform: translateX(0); }
+
+  .panel-header {
+    display: flex; align-items: flex-start; gap: 0.5rem;
+    padding: 1rem 1rem 0.75rem;
+    border-bottom: 1px solid var(--color-border, #e5e5e5);
+    flex-shrink: 0;
+  }
+  .panel-header h3 { margin: 0; font-size: 1rem; flex: 1; }
+
+  .panel-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 1.1rem; opacity: 0.4; padding: 0 0.2rem;
+    flex-shrink: 0; color: inherit; line-height: 1; margin-top: 1px;
+  }
+  .panel-close:hover { opacity: 1; }
+
+  .panel-footer {
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--color-border, #e5e5e5);
+    display: flex; justify-content: flex-end; gap: 0.5rem;
+    flex-shrink: 0;
+  }
+  .panel-footer button { font-size: 0.95rem; padding: 0.55rem 1.75rem; }
+
+  /* ══════════════════════════════════════
+     DETAIL PANEL
+  ══════════════════════════════════════ */
+  #panel-badge {
+    flex-shrink: 0; font-size: 0.65rem; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 0.2rem 0.55rem; border-radius: 99px;
+    align-self: flex-start; margin-top: 2px;
+  }
+  .badge-do       { background: #dff0e8; color: #2a6648; }
+  .badge-schedule { background: #dde8f5; color: #1a3f6e; }
+  .badge-delegate { background: #fdecd6; color: #8a4a10; }
+  .badge-delete   { background: #fad9d9; color: #8a2020; }
+
+  #panel-title {
+    flex: 1; font-size: 1rem; font-weight: 600;
+    border: none; outline: none; background: transparent; color: inherit;
+    font-family: inherit; resize: none; line-height: 1.4; padding: 0;
+    overflow: hidden; min-height: 1.4em;
+  }
+
+  /* ── FORMATTING TOOLBAR ── */
+  .fmt-toolbar {
+    display: flex; align-items: center; gap: 0.1rem;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--color-border, #e5e5e5);
+    flex-shrink: 0; flex-wrap: wrap; row-gap: 0.25rem;
+  }
+  .fmt-btn {
+    position: relative; background: none; border: 1px solid transparent;
+    border-radius: 5px; cursor: pointer; color: inherit;
+    min-width: 30px; height: 30px; padding: 0 0.45rem;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.82rem; font-family: inherit; white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s; overflow: visible;
+  }
+  .fmt-btn:hover  { background: rgba(0,0,0,0.055); border-color: rgba(0,0,0,0.09); }
+  .fmt-btn.active { background: rgba(0,0,0,0.09);  border-color: rgba(0,0,0,0.13); }
+  @media (prefers-color-scheme: dark) {
+    .fmt-btn:hover  { background: rgba(255,255,255,0.1);  border-color: rgba(255,255,255,0.13); }
+    .fmt-btn.active { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.18); }
+  }
+  .fmt-btn[data-cmd="bold"]          { font-weight: 700; }
+  .fmt-btn[data-cmd="italic"]        { font-style: italic; }
+  .fmt-btn[data-cmd="underline"]     { text-decoration: underline; }
+  .fmt-btn[data-cmd="strikeThrough"] { text-decoration: line-through; }
+  .fmt-divider { width: 1px; height: 18px; flex-shrink: 0; margin: 0 0.2rem; background: rgba(0,0,0,0.1); }
+  @media (prefers-color-scheme: dark) { .fmt-divider { background: rgba(255,255,255,0.15); } }
+
+  /* ── NOTES AREA ── */
+  #panel-notes {
+    flex: 1; padding: 0.9rem 1rem;
+    overflow-y: auto; outline: none;
+    font-size: 0.875rem; line-height: 1.7; color: inherit; min-height: 0;
+  }
+  #panel-notes h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.5rem; line-height: 1.25; }
+  #panel-notes h2 { font-size: 1.1rem;  font-weight: 600; margin-bottom: 0.4rem; line-height: 1.3; }
+  #panel-notes h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; line-height: 1.35; }
+  #panel-notes p  { margin-bottom: 0.5rem; }
+  #panel-notes pre {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.82rem; line-height: 1.6;
+    background: rgba(0,0,0,0.05); border-radius: 5px;
+    padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  @media (prefers-color-scheme: dark) { #panel-notes pre { background: rgba(255,255,255,0.07); } }
+  #panel-notes ul, #panel-notes ol { padding-left: 1.4rem; margin-bottom: 0.5rem; }
+  #panel-notes ul.dashed { list-style: none; padding-left: 1.2rem; }
+  #panel-notes ul.dashed > li::before { content: "–"; margin-right: 0.45rem; opacity: 0.55; }
+  #panel-notes li { margin-bottom: 0.2rem; }
+  /* subtask indentation — Tab key creates nested lists natively */
+  #panel-notes li > ol,
+  #panel-notes li > ul { margin-top: 0.2rem; margin-bottom: 0; }
+  #panel-notes blockquote {
+    border-left: 3px solid rgba(0,0,0,0.18); padding-left: 0.75rem; opacity: 0.7; margin: 0.5rem 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    #panel-notes blockquote { border-left-color: rgba(255,255,255,0.25); }
+    #panel-notes:empty::before { color: rgba(255,255,255,0.3); }
+  }
+  #panel-notes:empty::before {
+    content: attr(data-placeholder); color: rgba(0,0,0,0.3); pointer-events: none;
+  }
+
+  /* ══════════════════════════════════════
+     ARCHIVE PANEL
+  ══════════════════════════════════════ */
+  .archive-empty {
+    padding: 2rem 1rem; text-align: center;
+    font-size: 0.85rem; opacity: 0.4; font-style: italic;
+  }
+
+  .archive-list { list-style: none; flex: 1; overflow-y: auto; min-height: 0; padding: 0.5rem 0; }
+
+  .archive-item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--color-border, #f0f0f0);
+    font-size: 0.85rem;
+  }
+  .archive-item:last-child { border-bottom: none; }
+
+  .archive-item-info { flex: 1; min-width: 0; }
+  .archive-item-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .archive-item-meta { font-size: 0.72rem; opacity: 0.45; margin-top: 0.1rem; }
+
+  .archive-badge {
+    font-size: 0.62rem; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 0.15rem 0.45rem;
+    border-radius: 99px; flex-shrink: 0;
+  }
+
+  .btn-restore {
+    background: none; border: 1px solid rgba(0,0,0,0.15); border-radius: 5px;
+    font-size: 0.72rem; padding: 0.2rem 0.55rem; cursor: pointer;
+    color: inherit; flex-shrink: 0; transition: background 0.12s;
+  }
+  .btn-restore:hover { background: rgba(0,0,0,0.06); }
+  @media (prefers-color-scheme: dark) {
+    .btn-restore { border-color: rgba(255,255,255,0.2); }
+    .btn-restore:hover { background: rgba(255,255,255,0.1); }
+    .archive-item { border-bottom-color: rgba(255,255,255,0.07); }
+  }
+</style>
+</head>
+<body>
+
+<div id="config-notice">
+  <div role="alert" data-variant="warning">
+    <strong>Setup required:</strong> Replace <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in the script. Running in <strong>local-only mode</strong> until then.
+  </div>
+</div>
+
+<div class="topbar">
+  <h2>Eisenhower Matrix</h2>
+  <div class="topbar-right">
+    <span id="status-bar"></span>
+    <!-- Trash / archive button -->
+    <button class="trash-btn" onclick="openArchive()" title="Deleted tasks">🗑 Archive</button>
+    <!-- Legend -->
+    <div class="legend-wrap">
+      <button class="legend-btn" onclick="toggleLegend()" title="What is this?">ⓘ</button>
+      <div class="legend-popover" id="legend-popover">
+        <h4>Eisenhower Matrix</h4>
+        <div class="legend-item">
+          <div class="legend-dot ldot-do"></div>
+          <div class="legend-item-text">
+            <strong>Do — Urgent &amp; Important</strong>
+            <span>Critical tasks that need your immediate attention. Do these first, today.</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot ldot-schedule"></div>
+          <div class="legend-item-text">
+            <strong>Schedule — Important, Not Urgent</strong>
+            <span>High-value work that moves you forward. Block time for these; don't let them become urgent.</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot ldot-delegate"></div>
+          <div class="legend-item-text">
+            <strong>Delegate — Urgent, Not Important</strong>
+            <span>Time-sensitive but low personal value. Hand off to someone else where possible.</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot ldot-delete"></div>
+          <div class="legend-item-text">
+            <strong>Delete — Neither Urgent nor Important</strong>
+            <span>Distractions and low-value activities. Eliminate or ignore these entirely.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="axis-x">
+  <span class="axis-label">← Urgent</span>
+  <span class="axis-label">Not urgent →</span>
+</div>
+
+<div class="matrix">
+  <div class="quad quad-do" data-q="do">
+    <div class="quad-header"><strong>Do</strong><span class="quad-hint">Urgent · Important</span></div>
+    <ul class="task-list" id="list-do"></ul>
+    <div class="add-row">
+      <input type="text" id="input-do" placeholder="Add task…" onkeydown="handleKey(event,'do')">
+      <button onclick="addTask('do')">+</button>
+    </div>
+  </div>
+  <div class="quad quad-schedule" data-q="schedule">
+    <div class="quad-header"><strong>Schedule</strong><span class="quad-hint">Important · Not urgent</span></div>
+    <ul class="task-list" id="list-schedule"></ul>
+    <div class="add-row">
+      <input type="text" id="input-schedule" placeholder="Add task…" onkeydown="handleKey(event,'schedule')">
+      <button onclick="addTask('schedule')">+</button>
+    </div>
+  </div>
+  <div class="quad quad-delegate" data-q="delegate">
+    <div class="quad-header"><strong>Delegate</strong><span class="quad-hint">Urgent · Not important</span></div>
+    <ul class="task-list" id="list-delegate"></ul>
+    <div class="add-row">
+      <input type="text" id="input-delegate" placeholder="Add task…" onkeydown="handleKey(event,'delegate')">
+      <button onclick="addTask('delegate')">+</button>
+    </div>
+  </div>
+  <div class="quad quad-delete" data-q="delete">
+    <div class="quad-header"><strong>Delete</strong><span class="quad-hint">Not urgent · Not important</span></div>
+    <ul class="task-list" id="list-delete"></ul>
+    <div class="add-row">
+      <input type="text" id="input-delete" placeholder="Add task…" onkeydown="handleKey(event,'delete')">
+      <button onclick="addTask('delete')">+</button>
+    </div>
+  </div>
+</div>
+
+<!-- Drag ghost -->
+<div id="drag-ghost"></div>
+
+<!-- Undo toast -->
+<div id="undo-toast">
+  <span id="undo-msg">Task deleted</span>
+  <button onclick="undoDelete()">Undo</button>
+</div>
+
+<!-- Shared overlay (covers detail + archive panels) -->
+<div class="panel-overlay" id="panel-overlay" onclick="closeAllPanels()"></div>
+
+<!-- ── DETAIL PANEL ── -->
+<div class="slide-panel" id="detail-panel">
+  <div class="panel-header">
+    <span id="panel-badge"></span>
+    <textarea id="panel-title" rows="1" placeholder="Task title…" oninput="autoResize(this)"></textarea>
+    <button class="panel-close" onclick="closeDetailPanel()">✕</button>
+  </div>
+  <div class="fmt-toolbar">
+    <button class="fmt-btn" data-cmd="bold"          title="Bold">B</button>
+    <button class="fmt-btn" data-cmd="italic"        title="Italic">I</button>
+    <button class="fmt-btn" data-cmd="underline"     title="Underline">U</button>
+    <button class="fmt-btn" data-cmd="strikeThrough" title="Strikethrough">S</button>
+    <div class="fmt-divider"></div>
+    <button class="fmt-btn" data-block="H1"  title="Title">Title</button>
+    <button class="fmt-btn" data-block="H2"  title="Heading">Heading</button>
+    <button class="fmt-btn" data-block="H3"  title="Subheading">Sub</button>
+    <button class="fmt-btn" data-block="P"   title="Body text">Body</button>
+    <button class="fmt-btn" data-block="PRE" title="Monostyled">Mono</button>
+    <div class="fmt-divider"></div>
+    <button class="fmt-btn" data-cmd="insertUnorderedList" title="Bulleted list">•</button>
+    <button class="fmt-btn" data-list="dashed"             title="Dashed list">–</button>
+    <button class="fmt-btn" data-cmd="insertOrderedList"   title="Numbered list">1.</button>
+    <div class="fmt-divider"></div>
+    <button class="fmt-btn" data-block="BLOCKQUOTE" title="Block quote">❝</button>
+  </div>
+  <div id="panel-notes" contenteditable="true" data-placeholder="Add notes, details, links… Use Tab inside a list to create subtasks."></div>
+  <div class="panel-footer">
+    <button onclick="closeDetailPanel()">Done</button>
+  </div>
+</div>
+
+<!-- ── ARCHIVE PANEL ── -->
+<div class="slide-panel" id="archive-panel">
+  <div class="panel-header">
+    <h3>🗑 Deleted Tasks</h3>
+    <button class="panel-close" onclick="closeArchive()">✕</button>
+  </div>
+  <ul class="archive-list" id="archive-list"></ul>
+  <div class="panel-footer">
+    <button onclick="closeArchive()">Close</button>
+  </div>
+</div>
+
+<script>
+/*
+  ════════════════════════════════════════════════════
+  SUPABASE SETUP
+  ════════════════════════════════════════════════════
+  1. Create a free project at https://supabase.com
+
+  2. In SQL Editor, run:
+
+      create table tasks (
+        id uuid primary key default gen_random_uuid(),
+        quadrant text not null check (quadrant in ('do','schedule','delegate','delete')),
+        text text not null,
+        notes text not null default '',
+        position integer not null default 0,
+        created_at timestamptz default now()
+      );
+      alter table tasks enable row level security;
+      create policy "allow all" on tasks for all using (true) with check (true);
+
+      create table archive (
+        id uuid primary key default gen_random_uuid(),
+        quadrant text not null,
+        text text not null,
+        notes text not null default '',
+        deleted_at timestamptz default now()
+      );
+      alter table archive enable row level security;
+      create policy "allow all" on archive for all using (true) with check (true);
+
+  3. Project Settings → API → copy Project URL + anon key below.
+  ════════════════════════════════════════════════════
+*/
+const SUPABASE_URL      = "https://cbewikyrbxyvlatrxtmp.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiZXdpa3lyYnh5dmxhdHJ4dG1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwNTE3MTgsImV4cCI6MjA5MzYyNzcxOH0.os7-_4AYDr_F75LMkmUN0FPfKC--rpOHLBNzzUtwPHI";
+
+let sb, configured = false;
+let tasks   = { do: [], schedule: [], delegate: [], delete: [] };
+let archive = []; // deleted tasks stored locally always
+
+function setStatus(msg) { document.getElementById("status-bar").textContent = msg; }
+
+window.addEventListener("load", () => {
+  loadArchive();
+  if (SUPABASE_URL.includes("YOUR_PROJECT")) {
+    setStatus("Local mode — not synced across devices");
+    loadLocal();
+  } else {
+    document.getElementById("config-notice").style.display = "none";
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    configured = true;
+    loadCloud();
+  }
+  initDropZones();
+  initToolbar();
+});
+
+// ── LOCAL ────────────────────────────────────────
+function loadLocal() {
+  const raw = JSON.parse(localStorage.getItem("em_tasks_v1") || "null");
+  if (raw) {
+    ["do","schedule","delegate","delete"].forEach(q => {
+      tasks[q] = (raw[q] || []).map(t =>
+        typeof t === "string"
+          ? { id: crypto.randomUUID(), text: t, notes: "", quadrant: q }
+          : { notes: "", ...t }
+      );
+    });
+  }
+  render();
+}
+function saveLocal() { localStorage.setItem("em_tasks_v1", JSON.stringify(tasks)); }
+
+// ── ARCHIVE ───────────────────────────────────────
+function loadArchive() {
+  archive = JSON.parse(localStorage.getItem("em_archive_v1") || "[]");
+}
+function saveArchiveLocal() { localStorage.setItem("em_archive_v1", JSON.stringify(archive)); }
+
+async function loadArchiveCloud() {
+  const { data, error } = await sb.from("archive").select("*").order("deleted_at", { ascending: false });
+  if (error) { console.warn("Archive load failed:", error.message); return; }
+  archive = data.map(r => ({
+    id: r.id, quadrant: r.quadrant, text: r.text,
+    notes: r.notes || "", deletedAt: r.deleted_at
+  }));
+  saveArchiveLocal();
+}
+
+async function insertArchiveCloud(task) {
+  const { error } = await sb.from("archive").insert({
+    id: task.id, quadrant: task.quadrant,
+    text: task.text, notes: task.notes || "",
+    deleted_at: task.deletedAt
+  });
+  if (error) console.warn("Archive insert failed:", error.message);
+}
+
+async function deleteArchiveCloud(id) {
+  const { error } = await sb.from("archive").delete().eq("id", id);
+  if (error) console.warn("Archive delete failed:", error.message);
+}
+
+// ── CLOUD ────────────────────────────────────────
+async function loadCloud() {
+  setStatus("Loading…");
+  const { data, error } = await sb.from("tasks").select("*").order("position").order("created_at");
+  if (error) { setStatus("⚠ " + error.message); return; }
+  tasks = { do: [], schedule: [], delegate: [], delete: [] };
+  data.forEach(r => { r.notes = r.notes || ""; tasks[r.quadrant]?.push(r); });
+  render();
+  await loadArchiveCloud(); // load archive from Supabase too
+  setStatus("Synced ✓");
+  setTimeout(() => setStatus(""), 2000);
+}
+
+async function insertCloud(quadrant, text) {
+  const { data, error } = await sb
+    .from("tasks").insert({ quadrant, text, notes: "", position: tasks[quadrant].length })
+    .select().single();
+  if (error) { setStatus("⚠ Save failed: " + error.message); return null; }
+  return data;
+}
+
+async function deleteCloud(id) {
+  const { error } = await sb.from("tasks").delete().eq("id", id);
+  if (error) setStatus("⚠ Delete failed: " + error.message);
+}
+
+async function updateCloud(id, fields) {
+  const { error } = await sb.from("tasks").update(fields).eq("id", id);
+  if (error) setStatus("⚠ Update failed: " + error.message);
+}
+
+// ── ADD ──────────────────────────────────────────
+async function addTask(q) {
+  const input = document.getElementById("input-" + q);
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = ""; input.focus();
+  if (configured) {
+    setStatus("Saving…");
+    const row = await insertCloud(q, text);
+    if (!row) return;
+    tasks[q].push(row);
+    setStatus("Saved ✓");
+    setTimeout(() => setStatus(""), 1500);
+  } else {
+    tasks[q].push({ id: crypto.randomUUID(), text, notes: "", quadrant: q });
+    saveLocal();
+  }
+  render();
+}
+
+function handleKey(e, q) {
+  if (e.key === "Enter") { e.preventDefault(); addTask(q); }
+}
+
+// ── UNDO DELETE ───────────────────────────────────
+let undoTask   = null;
+let undoTimer  = null;
+const UNDO_MS  = 5000;
+
+async function removeTask(q, id) {
+  if (panelTaskId === id) closeDetailPanel();
+
+  const task = tasks[q].find(t => t.id === id);
+  if (!task) return;
+
+  // Remove from live tasks
+  tasks[q] = tasks[q].filter(t => t.id !== id);
+  render();
+
+  // Stage for undo
+  undoTask = { ...task, deletedAt: new Date().toISOString() };
+  showUndoToast(`"${task.text.slice(0, 30)}${task.text.length > 30 ? '…' : ''}" deleted`);
+
+  // After UNDO_MS, commit deletion permanently
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => commitDelete(undoTask), UNDO_MS);
+
+  if (!configured) saveLocal();
+}
+
+function showUndoToast(msg) {
+  document.getElementById("undo-msg").textContent = msg;
+  const t = document.getElementById("undo-toast");
+  t.classList.add("show");
+  // auto-hide after UNDO_MS
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => t.classList.remove("show"), UNDO_MS);
+}
+
+function hideUndoToast() {
+  document.getElementById("undo-toast").classList.remove("show");
+  clearTimeout(window._toastTimer);
+}
+
+function undoDelete() {
+  if (!undoTask) return;
+  clearTimeout(undoTimer);
+  // Restore to live tasks
+  const { deletedAt, ...task } = undoTask;
+  tasks[task.quadrant].push(task);
+  undoTask = null;
+  hideUndoToast();
+  render();
+  saveLocal();
+}
+
+async function commitDelete(task) {
+  if (!task) return;
+  hideUndoToast();
+  // Add to archive
+  archive.unshift({ ...task });
+  saveArchiveLocal();
+  undoTask = null;
+  if (configured) {
+    await deleteCloud(task.id);          // remove from tasks table
+    await insertArchiveCloud(task);      // add to archive table
+  } else {
+    saveLocal();
+  }
+}
+
+// ── MOVE ────────────────────────────────────────
+async function moveTask(fromQ, toQ, id) {
+  if (fromQ === toQ) return;
+  const task = tasks[fromQ].find(t => t.id === id);
+  if (!task) return;
+  tasks[fromQ] = tasks[fromQ].filter(t => t.id !== id);
+  task.quadrant = toQ;
+  tasks[toQ].push(task);
+  render();
+  if (panelTaskId === id) updatePanelBadge(toQ);
+  if (configured) {
+    setStatus("Moving…");
+    await updateCloud(id, { quadrant: toQ, position: tasks[toQ].length - 1 });
+    setStatus("Moved ✓");
+    setTimeout(() => setStatus(""), 1500);
+  } else { saveLocal(); }
+}
+
+// ── RENDER ───────────────────────────────────────
+function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function render() {
+  ["do","schedule","delegate","delete"].forEach(q => {
+    const ul = document.getElementById("list-" + q);
+    ul.innerHTML = "";
+    if (tasks[q].length === 0) {
+      ul.innerHTML = `<li class="task-empty">No tasks yet — drag one here or add below</li>`;
+      return;
+    }
+    tasks[q].forEach(task => {
+      const li = document.createElement("li");
+      li.className = "task-item";
+      li.draggable = true;
+      li.dataset.id = task.id;
+      li.dataset.q  = q;
+      const hasNotes = task.notes && task.notes.trim().length > 0;
+      li.innerHTML =
+        `<span class="drag-handle">⠿</span>` +
+        `<span class="task-text${hasNotes ? " has-notes" : ""}" onclick="openDetailPanel('${q}','${task.id}')">${esc(task.text)}</span>` +
+        `<button class="btn-del" onclick="removeTask('${q}','${task.id}')" title="Remove">✕</button>`;
+      li.addEventListener("dragstart", onDragStart);
+      li.addEventListener("dragend",   onDragEnd);
+      li.addEventListener("drag",      onDragMove);
+      li.addEventListener("touchstart", onTouchStart, { passive: false });
+      li.addEventListener("touchmove",  onTouchMove,  { passive: false });
+      li.addEventListener("touchend",   onTouchEnd);
+      ul.appendChild(li);
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════
+// LEGEND
+// ══════════════════════════════════════════════════
+function toggleLegend() {
+  document.getElementById("legend-popover").classList.toggle("open");
+}
+document.addEventListener("click", e => {
+  if (!e.target.closest(".legend-wrap")) {
+    document.getElementById("legend-popover").classList.remove("open");
+  }
+});
+
+// ══════════════════════════════════════════════════
+// ARCHIVE PANEL
+// ══════════════════════════════════════════════════
+const QUAD_META = {
+  do:       { label: "Do",       badgeClass: "badge-do" },
+  schedule: { label: "Schedule", badgeClass: "badge-schedule" },
+  delegate: { label: "Delegate", badgeClass: "badge-delegate" },
+  delete:   { label: "Delete",   badgeClass: "badge-delete" },
+};
+
+function openArchive() {
+  renderArchive();
+  document.getElementById("archive-panel").classList.add("open");
+  document.getElementById("panel-overlay").classList.add("open");
+}
+
+function closeArchive() {
+  document.getElementById("archive-panel").classList.remove("open");
+  document.getElementById("panel-overlay").classList.remove("open");
+}
+
+function renderArchive() {
+  const ul = document.getElementById("archive-list");
+  ul.innerHTML = "";
+  if (archive.length === 0) {
+    ul.innerHTML = `<li class="archive-empty">No deleted tasks yet.</li>`;
+    return;
+  }
+  archive.forEach((task, i) => {
+    const meta = QUAD_META[task.quadrant] || QUAD_META.do;
+    const date = task.deletedAt ? new Date(task.deletedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+    const li = document.createElement("li");
+    li.className = "archive-item";
+    li.innerHTML =
+      `<span class="archive-badge ${meta.badgeClass}">${meta.label}</span>` +
+      `<div class="archive-item-info">
+         <div class="archive-item-text">${esc(task.text)}</div>
+         ${date ? `<div class="archive-item-meta">Deleted ${date}</div>` : ""}
+       </div>` +
+      `<button class="btn-restore" onclick="restoreTask(${i})">Restore</button>`;
+    ul.appendChild(li);
+  });
+}
+
+async function restoreTask(i) {
+  const task = archive[i];
+  if (!task) return;
+  archive.splice(i, 1);
+  saveArchiveLocal();
+  // Restore to live tasks
+  const restored = { ...task };
+  delete restored.deletedAt;
+  restored.position = tasks[restored.quadrant]?.length || 0;
+  tasks[restored.quadrant] = tasks[restored.quadrant] || [];
+  tasks[restored.quadrant].push(restored);
+  render();
+  renderArchive();
+  if (configured) {
+    await deleteArchiveCloud(restored.id);   // remove from archive table
+    await sb.from("tasks").upsert({          // re-insert into tasks table
+      id: restored.id, quadrant: restored.quadrant,
+      text: restored.text, notes: restored.notes || "",
+      position: restored.position
+    }).select();
+  } else {
+    saveLocal();
+  }
+}
+
+// ══════════════════════════════════════════════════
+// DETAIL PANEL
+// ══════════════════════════════════════════════════
+let panelTaskId = null, panelQ = null, saveTimer = null;
+
+function openDetailPanel(q, id) {
+  const task = tasks[q]?.find(t => t.id === id);
+  if (!task) return;
+  panelTaskId = id; panelQ = q;
+  const titleEl = document.getElementById("panel-title");
+  titleEl.value = task.text; autoResize(titleEl);
+  document.getElementById("panel-notes").innerHTML = task.notes || "";
+  updatePanelBadge(q);
+  document.getElementById("detail-panel").classList.add("open");
+  document.getElementById("panel-overlay").classList.add("open");
+}
+
+function updatePanelBadge(q) {
+  const badge = document.getElementById("panel-badge");
+  badge.textContent = QUAD_META[q].label;
+  badge.className   = "panel-badge " + QUAD_META[q].badgeClass; // reuse badge classes
+}
+// Make panel-badge also use the badge-* classes
+document.getElementById("panel-badge").className = "panel-badge";
+
+function closeDetailPanel() {
+  if (panelTaskId) flushPanelSave();
+  document.getElementById("detail-panel").classList.remove("open");
+  document.getElementById("panel-overlay").classList.remove("open");
+  panelTaskId = null; panelQ = null;
+}
+
+function closeAllPanels() {
+  closeDetailPanel();
+  closeArchive();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeAllPanels();
+});
+
+function autoResize(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+
+function schedulePanelSave() { clearTimeout(saveTimer); saveTimer = setTimeout(flushPanelSave, 800); }
+
+function flushPanelSave() {
+  clearTimeout(saveTimer);
+  if (!panelTaskId) return;
+  const newText  = document.getElementById("panel-title").value.trim();
+  const newNotes = document.getElementById("panel-notes").innerHTML;
+  const q = panelQ || Object.keys(tasks).find(q => tasks[q].some(t => t.id === panelTaskId));
+  if (!q) return;
+  const task = tasks[q].find(t => t.id === panelTaskId);
+  if (!task) return;
+  const changed = (newText && newText !== task.text) || newNotes !== (task.notes || "");
+  if (!changed) return;
+  if (newText) task.text = newText;
+  task.notes = newNotes;
+  render();
+  if (configured) updateCloud(task.id, { text: task.text, notes: task.notes });
+  else saveLocal();
+}
+
+document.getElementById("panel-title").addEventListener("input", schedulePanelSave);
+document.getElementById("panel-notes").addEventListener("input", schedulePanelSave);
+
+// ══════════════════════════════════════════════════
+// FORMATTING TOOLBAR
+// ══════════════════════════════════════════════════
+function initToolbar() {
+  const notes = document.getElementById("panel-notes");
+  document.querySelectorAll(".fmt-btn").forEach(btn => {
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault();
+      const cmd = btn.dataset.cmd, block = btn.dataset.block, list = btn.dataset.list;
+      if (cmd) {
+        document.execCommand(cmd, false, null);
+      } else if (list === "dashed") {
+        document.execCommand("insertUnorderedList", false, null);
+        const sel = window.getSelection();
+        if (sel.rangeCount) {
+          const node = sel.getRangeAt(0).commonAncestorContainer;
+          const ul = (node.nodeType === 3 ? node.parentElement : node).closest("ul");
+          if (ul) ul.classList.toggle("dashed");
+        }
+      } else if (block) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return;
+        const node = sel.getRangeAt(0).commonAncestorContainer;
+        const parent = node.nodeType === 3 ? node.parentElement : node;
+        if (block === "PRE") {
+          document.execCommand("formatBlock", false, parent.closest("pre") ? "p" : "pre");
+        } else if (block === "P") {
+          document.execCommand("formatBlock", false, "p");
+        } else if (block === "BLOCKQUOTE") {
+          document.execCommand("formatBlock", false, parent.closest("blockquote") ? "p" : "blockquote");
+        } else {
+          document.execCommand("formatBlock", false, parent.closest(block) ? "p" : block);
+        }
+      }
+      updateToolbarState();
+      notes.focus();
+    });
+  });
+  document.addEventListener("selectionchange", updateToolbarState);
+}
+
+function updateToolbarState() {
+  const sel = window.getSelection();
+  const node = sel?.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+  const parent = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
+  document.querySelectorAll(".fmt-btn").forEach(btn => {
+    const { cmd, block, list } = btn.dataset;
+    if (cmd) btn.classList.toggle("active", document.queryCommandState(cmd));
+    else if (block && parent) btn.classList.toggle("active", !!parent.closest(block.toLowerCase()));
+    else if (list === "dashed" && parent) {
+      const ul = parent.closest("ul");
+      btn.classList.toggle("active", !!(ul?.classList.contains("dashed")));
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════
+// DRAG AND DROP
+// ══════════════════════════════════════════════════
+let dragId = null, dragQ = null, dragEl = null;
+const ghost = document.getElementById("drag-ghost");
+const emptyImg = new Image();
+emptyImg.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+function onDragStart(e) {
+  dragId = e.currentTarget.dataset.id; dragQ = e.currentTarget.dataset.q; dragEl = e.currentTarget;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragId);
+  e.dataTransfer.setDragImage(emptyImg, 0, 0);
+  ghost.textContent = e.currentTarget.querySelector(".task-text").textContent;
+  ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px";
+  ghost.classList.add("visible");
+  requestAnimationFrame(() => dragEl.classList.add("dragging"));
+}
+function onDragMove(e) {
+  if (!dragId || !e.clientX) return;
+  ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px";
+}
+function onDragEnd() {
+  if (dragEl) dragEl.classList.remove("dragging");
+  ghost.classList.remove("visible");
+  clearDropHighlights();
+  dragId = dragQ = dragEl = null;
+}
+
+let touchOffsetX = 0, touchOffsetY = 0;
+function onTouchStart(e) {
+  const touch = e.touches[0], li = e.currentTarget;
+  dragId = li.dataset.id; dragQ = li.dataset.q; dragEl = li;
+  const rect = li.getBoundingClientRect();
+  touchOffsetX = touch.clientX - rect.left; touchOffsetY = touch.clientY - rect.top;
+  ghost.textContent = li.querySelector(".task-text").textContent;
+  ghost.style.left = (touch.clientX - touchOffsetX) + "px";
+  ghost.style.top  = (touch.clientY - touchOffsetY) + "px";
+  requestAnimationFrame(() => li.classList.add("dragging"));
+  e.preventDefault();
+}
+function onTouchMove(e) {
+  if (!dragId) return;
+  const touch = e.touches[0];
+  ghost.style.left = (touch.clientX - touchOffsetX) + "px";
+  ghost.style.top  = (touch.clientY - touchOffsetY) + "px";
+  ghost.classList.add("visible");
+  ghost.style.display = "none";
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  ghost.style.display = "";
+  clearDropHighlights();
+  const quad = el?.closest(".quad");
+  if (quad && quad.dataset.q !== dragQ) quad.classList.add("drag-over");
+  e.preventDefault();
+}
+function onTouchEnd(e) {
+  if (!dragId) return;
+  ghost.classList.remove("visible");
+  if (dragEl) dragEl.classList.remove("dragging");
+  const touch = e.changedTouches[0];
+  ghost.style.display = "none";
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  ghost.style.display = "";
+  clearDropHighlights();
+  const quad = el?.closest(".quad");
+  if (quad?.dataset.q && quad.dataset.q !== dragQ) moveTask(dragQ, quad.dataset.q, dragId);
+  dragId = dragQ = dragEl = null;
+}
+
+function initDropZones() {
+  document.querySelectorAll(".quad").forEach(quad => {
+    quad.addEventListener("dragover", e => {
+      e.preventDefault(); e.dataTransfer.dropEffect = "move";
+      clearDropHighlights();
+      if (quad.dataset.q !== dragQ) quad.classList.add("drag-over");
+    });
+    quad.addEventListener("dragleave", e => {
+      if (!quad.contains(e.relatedTarget)) quad.classList.remove("drag-over");
+    });
+    quad.addEventListener("drop", e => {
+      e.preventDefault();
+      clearDropHighlights();
+      if (quad.dataset.q && dragId && quad.dataset.q !== dragQ) moveTask(dragQ, quad.dataset.q, dragId);
+    });
+  });
+}
+function clearDropHighlights() {
+  document.querySelectorAll(".quad.drag-over").forEach(q => q.classList.remove("drag-over"));
+}
+</script>
+</body>
+</html>
