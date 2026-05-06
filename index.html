@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
 <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; font-family: var(--font, sans-serif); }
@@ -136,7 +137,7 @@
     font-size: 0.8rem; line-height: 1.35;
     padding: 0.35rem 0.45rem; border-radius: 6px;
     background: rgba(255,255,255,0.65);
-    cursor: grab; user-select: none; touch-action: none;
+    cursor: grab; user-select: none;
     animation: fadein 0.15s ease;
     border: 1.5px solid transparent;
     transition: opacity 0.15s, border-color 0.15s;
@@ -553,11 +554,11 @@
       alter table archive enable row level security;
       create policy "allow all" on archive for all using (true) with check (true);
 
-  3. Project Settings → API → copy Project URL + anon key below.
+  3. Project Settings → API → copy Project URL + anon key into config.js
   ════════════════════════════════════════════════════
 */
-const SUPABASE_URL      = "https://cbewikyrbxyvlatrxtmp.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiZXdpa3lyYnh5dmxhdHJ4dG1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwNTE3MTgsImV4cCI6MjA5MzYyNzcxOH0.os7-_4AYDr_F75LMkmUN0FPfKC--rpOHLBNzzUtwPHI";
+
+// SUPABASE_URL and SUPABASE_ANON_KEY are loaded from config.js
 
 let sb, configured = false;
 let tasks   = { do: [], schedule: [], delegate: [], delete: [] };
@@ -786,12 +787,22 @@ function render() {
       const hasNotes = task.notes && task.notes.trim().length > 0;
       li.innerHTML =
         `<span class="drag-handle">⠿</span>` +
-        `<span class="task-text${hasNotes ? " has-notes" : ""}" onclick="openDetailPanel('${q}','${task.id}')">${esc(task.text)}</span>` +
-        `<button class="btn-del" onclick="removeTask('${q}','${task.id}')" title="Remove">✕</button>`;
+        `<span class="task-text${hasNotes ? " has-notes" : ""}">${esc(task.text)}</span>` +
+        `<button class="btn-del" title="Remove">✕</button>`;
+
+      // Desktop click to open panel (on task text only)
+      li.querySelector(".task-text").addEventListener("click", () => openDetailPanel(q, task.id));
+
+      // Delete button
+      li.querySelector(".btn-del").addEventListener("click", e => {
+        e.stopPropagation();
+        removeTask(q, task.id);
+      });
+
       li.addEventListener("dragstart", onDragStart);
       li.addEventListener("dragend",   onDragEnd);
       li.addEventListener("drag",      onDragMove);
-      li.addEventListener("touchstart", onTouchStart, { passive: false });
+      li.addEventListener("touchstart", onTouchStart, { passive: true });
       li.addEventListener("touchmove",  onTouchMove,  { passive: false });
       li.addEventListener("touchend",   onTouchEnd);
       ul.appendChild(li);
@@ -1032,20 +1043,34 @@ function onDragEnd() {
 }
 
 let touchOffsetX = 0, touchOffsetY = 0;
+let touchStartX = 0, touchStartY = 0;
+let touchDragging = false;
+const DRAG_THRESHOLD = 8; // px — movement needed before drag starts
+
 function onTouchStart(e) {
   const touch = e.touches[0], li = e.currentTarget;
   dragId = li.dataset.id; dragQ = li.dataset.q; dragEl = li;
   const rect = li.getBoundingClientRect();
   touchOffsetX = touch.clientX - rect.left; touchOffsetY = touch.clientY - rect.top;
+  touchStartX = touch.clientX; touchStartY = touch.clientY;
+  touchDragging = false;
   ghost.textContent = li.querySelector(".task-text").textContent;
   ghost.style.left = (touch.clientX - touchOffsetX) + "px";
   ghost.style.top  = (touch.clientY - touchOffsetY) + "px";
-  requestAnimationFrame(() => li.classList.add("dragging"));
-  e.preventDefault();
+  // don't preventDefault here — let taps through until we confirm drag
 }
 function onTouchMove(e) {
   if (!dragId) return;
   const touch = e.touches[0];
+  const dx = Math.abs(touch.clientX - touchStartX);
+  const dy = Math.abs(touch.clientY - touchStartY);
+
+  if (!touchDragging) {
+    if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) return; // not dragging yet
+    touchDragging = true;
+    dragEl.classList.add("dragging");
+  }
+
   ghost.style.left = (touch.clientX - touchOffsetX) + "px";
   ghost.style.top  = (touch.clientY - touchOffsetY) + "px";
   ghost.classList.add("visible");
@@ -1061,6 +1086,21 @@ function onTouchEnd(e) {
   if (!dragId) return;
   ghost.classList.remove("visible");
   if (dragEl) dragEl.classList.remove("dragging");
+
+  if (!touchDragging) {
+    // It was a tap — check it wasn't on the delete button
+    const touch = e.changedTouches[0];
+    const tappedEl = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (tappedEl && tappedEl.closest(".btn-del")) {
+      // let the delete button's own click handler fire
+    } else {
+      openDetailPanel(dragQ, dragId);
+    }
+    dragId = dragQ = dragEl = null;
+    touchDragging = false;
+    return;
+  }
+
   const touch = e.changedTouches[0];
   ghost.style.display = "none";
   const el = document.elementFromPoint(touch.clientX, touch.clientY);
@@ -1069,6 +1109,7 @@ function onTouchEnd(e) {
   const quad = el?.closest(".quad");
   if (quad?.dataset.q && quad.dataset.q !== dragQ) moveTask(dragQ, quad.dataset.q, dragId);
   dragId = dragQ = dragEl = null;
+  touchDragging = false;
 }
 
 function initDropZones() {
