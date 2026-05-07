@@ -8,6 +8,71 @@
 <script src="config.js"></script>
 <style>
   /* ═════════════════════════════════════════
+     LOGIN SCREEN
+  ═════════════════════════════════════════ */
+  #login-screen {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 1.5rem;
+  }
+  #login-screen.show { display: flex; }
+
+  .login-box {
+    width: 100%; max-width: 360px;
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.75rem 1.5rem;
+    background: var(--bg);
+  }
+  .login-box h2 {
+    font-size: 1.15rem; margin-bottom: 0.35rem; font-weight: 600;
+  }
+  .login-box p {
+    font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem;
+  }
+  .login-box label {
+    display: block; font-size: 0.75rem;
+    color: var(--muted); margin-bottom: 0.3rem; margin-top: 0.7rem;
+    letter-spacing: 0.03em;
+  }
+  .login-box input {
+    width: 100%; padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--fg);
+    font-size: 0.92rem; outline: none;
+  }
+  .login-box input:focus { border-color: rgba(0,0,0,0.4); }
+  @media (prefers-color-scheme: dark) {
+    .login-box input:focus { border-color: rgba(255,255,255,0.4); }
+  }
+  .login-box button[type="submit"] {
+    width: 100%; margin-top: 1.1rem;
+    padding: 0.6rem; background: #222; color: #fff;
+    border: none; border-radius: 6px; cursor: pointer;
+    font-size: 0.9rem; font-weight: 500;
+  }
+  .login-box button[type="submit"]:disabled { opacity: 0.5; cursor: wait; }
+  @media (prefers-color-scheme: dark) {
+    .login-box button[type="submit"] { background: #f0f0f0; color: #111; }
+  }
+  .login-toggle {
+    margin-top: 1rem; font-size: 0.82rem; text-align: center;
+    color: var(--muted);
+  }
+  .login-toggle a {
+    color: inherit; text-decoration: underline; cursor: pointer;
+    font-weight: 500;
+  }
+  .login-error {
+    color: #c0392b; font-size: 0.78rem;
+    margin-top: 0.6rem; min-height: 1em;
+  }
+  @media (prefers-color-scheme: dark) {
+    .login-error { color: #ff7676; }
+  }
+
+  /* ═════════════════════════════════════════
      RESET + BASE
   ═════════════════════════════════════════ */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -491,12 +556,36 @@
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <form class="login-box" id="login-form" onsubmit="handleAuth(event)">
+    <h2 id="login-title">Sign in</h2>
+    <p id="login-subtitle">Welcome back to your Eisenhower Matrix.</p>
+
+    <label for="email">Email</label>
+    <input type="email" id="email" required autocomplete="email" />
+
+    <label for="password">Password</label>
+    <input type="password" id="password" required autocomplete="current-password" minlength="6" />
+
+    <div class="login-error" id="login-error"></div>
+
+    <button type="submit" id="login-submit">Sign in</button>
+
+    <div class="login-toggle">
+      <span id="login-toggle-text">New here?</span>
+      <a onclick="toggleAuthMode()" id="login-toggle-link">Create an account</a>
+    </div>
+  </form>
+</div>
+
 <div class="topbar">
   <h2>Eisenhower Matrix</h2>
   <div class="topbar-right">
     <span id="status-bar"></span>
     <button class="pill-btn" id="lock-btn" onclick="toggleLock()">🔓 Unlock</button>
     <button class="pill-btn" onclick="openArchive()">🗑 Archive</button>
+    <button class="pill-btn" onclick="signOut()" id="signout-btn" style="display:none">Sign out</button>
     <div class="legend-wrap">
       <button class="pill-btn" onclick="toggleLegend(event)">ⓘ</button>
       <div class="legend-popover" id="legend-popover">
@@ -656,24 +745,126 @@ const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;
 // ════════════════════════════════════════════════
 // BOOT
 // ════════════════════════════════════════════════
-window.addEventListener("load", () => {
+let authMode = "signin"; // or "signup"
+
+window.addEventListener("load", async () => {
   applyLock();
   archive = JSON.parse(localStorage.getItem("em_archive_v1") || "[]");
 
   if (typeof SUPABASE_URL === "undefined" || SUPABASE_URL.includes("YOUR_")) {
     setStatus("Local mode");
     loadLocal();
-  } else {
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    configured = true;
-    loadCloud();
+    initDropZones();
+    initToolbar();
+    initPanelEvents();
+    initLegendDismiss();
+    return;
   }
+
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  configured = true;
+
+  // Check current session
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    onSignedIn();
+  } else {
+    showLogin();
+  }
+
+  // React to auth changes (login/logout from another tab, etc.)
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_IN" && session) onSignedIn();
+    if (event === "SIGNED_OUT")           showLogin();
+  });
 
   initDropZones();
   initToolbar();
   initPanelEvents();
   initLegendDismiss();
 });
+
+function showLogin() {
+  $("login-screen").classList.add("show");
+  $("signout-btn").style.display = "none";
+  // clear any tasks on screen
+  tasks = { do: [], schedule: [], delegate: [], delete: [] };
+  archive = [];
+  render();
+}
+
+function onSignedIn() {
+  $("login-screen").classList.remove("show");
+  $("signout-btn").style.display = "";
+  $("login-error").textContent = "";
+  $("password").value = "";
+  loadCloud();
+}
+
+// ════════════════════════════════════════════════
+// AUTH
+// ════════════════════════════════════════════════
+function toggleAuthMode() {
+  authMode = authMode === "signin" ? "signup" : "signin";
+  if (authMode === "signup") {
+    $("login-title").textContent = "Create account";
+    $("login-subtitle").textContent = "Sign up to start using your Eisenhower Matrix.";
+    $("login-submit").textContent = "Sign up";
+    $("login-toggle-text").textContent = "Already have an account?";
+    $("login-toggle-link").textContent = "Sign in";
+    $("password").autocomplete = "new-password";
+  } else {
+    $("login-title").textContent = "Sign in";
+    $("login-subtitle").textContent = "Welcome back to your Eisenhower Matrix.";
+    $("login-submit").textContent = "Sign in";
+    $("login-toggle-text").textContent = "New here?";
+    $("login-toggle-link").textContent = "Create an account";
+    $("password").autocomplete = "current-password";
+  }
+  $("login-error").textContent = "";
+}
+
+async function handleAuth(e) {
+  e.preventDefault();
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  const submitBtn = $("login-submit");
+  const errEl = $("login-error");
+
+  errEl.textContent = "";
+  submitBtn.disabled = true;
+  const originalLabel = submitBtn.textContent;
+  submitBtn.textContent = authMode === "signup" ? "Creating…" : "Signing in…";
+
+  try {
+    if (authMode === "signup") {
+      const { error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+      // If email confirmation is OFF, this auto-signs in via onAuthStateChange.
+      // If ON, show a confirmation message.
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) {
+        errEl.style.color = "var(--muted)";
+        errEl.textContent = "Check your email to confirm, then sign in.";
+        authMode = "signin"; toggleAuthMode(); toggleAuthMode();
+      }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    }
+  } catch (err) {
+    errEl.style.color = "";
+    errEl.textContent = err.message || "Something went wrong.";
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+  }
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  // onAuthStateChange handles the rest
+}
 
 // ════════════════════════════════════════════════
 // LOCAL STORAGE
